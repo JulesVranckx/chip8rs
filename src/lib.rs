@@ -235,7 +235,7 @@ impl CPU {
     }
 
     fn decode(&self, data: CellValue) -> Result<&Instruction, 'static str> {
-        return Err("decoding not implemented")
+        return Err("decoding not implemented    ")
     }
 
     fn execute(&mut self, instr: &Instruction) -> Result<(), &'static str> {
