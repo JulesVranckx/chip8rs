@@ -230,7 +230,15 @@ impl CPU {
         }
     }
 
-    fn execute_single(&mut self, instr: &Instruction) -> Result<(), &'static str> {
+    fn fetch(&self, addr: Addr) -> Result<CellValue, &'static str> {
+        return Err("fetching not implemented")
+    }
+
+    fn decode(&self, data: CellValue) -> Result<&Instruction, 'static str> {
+        return Err("decoding not implemented")
+    }
+
+    fn execute(&mut self, instr: &Instruction) -> Result<(), &'static str> {
         
         let mut increase_pc = true ;
 
@@ -275,8 +283,90 @@ impl CPU {
                 }
             }
 
-            Instruction::
-
+            Instruction::LDi(VIndex, VValue) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::ADDi(VIndex, VValue) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SE(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::LD(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::OR(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::AND(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::XOR(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::ADD(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SUB(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SHR(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SUBN(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SHL(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SNE(VIndex, VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::LD_I(Addr) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::JP_VO(Addr) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::RNDi(VIndex, VValue) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::DRW(VIndex, VIndex, u8) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SKP(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SKNP(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::LD_DT(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::LD_K(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SET_DT(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::SET_ST(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::ADD_I(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::LD_F(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::LD_B(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::ST_UNTIL(VIndex) => {
+                return Err("Not Implemented yet");
+            }
+            Instruction::LD_UNTIL(VIndex) => {
+                return Err("Not Implemented yet");
+            }
             _ => ()
         };
 
