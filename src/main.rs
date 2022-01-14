@@ -1,8 +1,9 @@
-use std::time::{Instant, Duration};
-use std::thread::sleep;
 use chip8::*;
 use clap::{Arg, App};
 use std::process;
+
+mod drivers;
+use drivers::{DisplayDriver, AudioDriver};
 
 fn main() {
 
@@ -10,19 +11,19 @@ fn main() {
         .version("0.0.0")
         .author("Jules Vranckx")
         .about("chip-8 emulator")
-        .arg(Arg::with_name("file")
+        .arg(Arg::new("file")
                  .short('f')
                  .long("file")
                  .takes_value(true)
                  .value_name("FILE")
                  .help("program to be executed"))
-        .arg(Arg::with_name("text input")
+        .arg(Arg::new("text input")
                   .short('t')
                   .long("text")
                   .takes_value(false)
                   .help("input file as text")
         )
-        .arg(Arg::with_name("raw input")
+        .arg(Arg::new("raw input")
                   .short('r')
                   .long("raw")
                   .takes_value(false)
@@ -41,9 +42,14 @@ fn main() {
     //     _ => ()
     // };
 
+    
+    let sdl_context = sdl2::init().unwrap();
+
     let filename = matches.value_of("file").unwrap();
     let bin = matches.is_present("raw input");
     let text = matches.is_present("text input");
+    let audio_driver = AudioDriver::new(&sdl_context);
+    let mut display_driver = DisplayDriver::new(&sdl_context);
     
     if bin && text {
         println!("Can't handle both bianry and text file. Use -r OR -t");
@@ -54,7 +60,7 @@ fn main() {
         process::exit(-1);
     }
 
-    let mut cpu = CPU::new(Some(10));
+    let mut cpu = CPU::new(Some(600));
 
     if bin {
         match cpu.loadb(filename){
@@ -78,26 +84,27 @@ fn main() {
         match cpu.next_cycle() {
             Ok(_) => {},
             Err(e) => {
-                panic!("{}", e);
+                println!("{}", e);
+                process::exit(-1);
             }
         }
         match cpu.simulate() {
             Ok(_) => {},
             Err(e) => {
-                panic!("{}", e);
+                println!("{}", e);
+                process::exit(-1);
             }
         }
 
         if let Ok(refresh) = cpu.consume_refresh() {
             if refresh {
                 let buff =  cpu.get_image().unwrap();
-                println!("Refresh screen");
+                display_driver.draw(buff);
             }
         }
 
         if let Ok(sound) = cpu.sound() {
             if sound {
-                println!("BMP");
             }
         }
 

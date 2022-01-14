@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 use std::time::Duration;
 use std::thread::sleep;
 use rand::Rng;
@@ -150,9 +151,9 @@ impl Registers {
         Ok(())
     }
 
-    fn get_f(&self) -> Result<&VValue, &'static str> {
-        Ok(&self.regs[15])
-    }
+    // fn get_f(&self) -> Result<&VValue, &'static str> {
+    //     Ok(&self.regs[15])
+    // }
 }
 
 /// Memory structure
@@ -526,19 +527,19 @@ impl CPU {
             CpuState::IDLE => {},
             
             CpuState::FETCH => {
-                println!("[+] fetching @{}", self.pc.get());
+                // println!("[+] fetching @{}", self.pc.get());
                 self.fetch()?;
             }
 
             CpuState::DECODE => {
-                println!("[+] decoding #{}", self.opcode);
+                // println!("[+] decoding #{}", self.opcode);
                 self.decode()?;
             }
 
             CpuState::EXEC => {
-                if let Some(instr) = &self.instr {
-                println!("[+] ccrt_instr: {:?}", instr);
-                }
+                // if let Some(instr) = &self.instr {
+                // println!("[+] ccrt_instr: {:?}", instr);
+                //}
                 simul_cycles = self.execute()?;
             }
         };
@@ -549,7 +550,7 @@ impl CPU {
         self.frequency_counter = (self.frequency_counter + simul_cycles as u32) % (self.frequency / 1) ;
 
         if self.frequency_counter == 0 {
-            for i in 0..simul_cycles {
+            for _ in 0..simul_cycles {
                 self.st.decrease()?;
                 self.dt.decrease()?;
             }
@@ -905,16 +906,15 @@ impl CPU {
                         let y = (self.v.read(*vy)? + i)  as usize% FRAME_BUFFER_HEIGHT ;
                         for j in 0..8 {
                             let x = (self.v.read(*vx)? + j) as usize % FRAME_BUFFER_LENGTH ;
-                            println!("x: {}, y: {}", x, y);
                             let pixel = value >> (7-j) & 1;
-                            set_f |= (pixel^self.frame_buff.read(y,x)?);
+                            set_f |= pixel^self.frame_buff.read(y,x)?;
                             self.frame_buff.write(y,x,pixel)?;
                         }
                         if set_f != 0{
                             self.v.set_f()?;
                         }
                     }
-                    self.set_refresh();
+                    self.set_refresh()?;
                 }
                 Instruction::SKP(vx) => {
                     let x = self.v.read(*vx)?;
@@ -954,8 +954,9 @@ impl CPU {
                     self.index_register.set(i)?;
                 }
                 Instruction::LD_F(vx) => {
-                    let i = 0x0;
+                    let i = *vx;
                     self.index_register.set(i)?;
+                    println!("MAYBE ME?");
                 }
                 Instruction::LD_B(vx) => {
                     let mut i = self.index_register.get()?;
@@ -977,7 +978,7 @@ impl CPU {
                         let x = self.v.read(i as VIndex)?;
                         self.ram.write(i_value + i, x)?;
                     }
-                    cycles = *vx as u64
+                    cycles = *vx as u64;
                 }
                 Instruction::LD_UNTIL(vx) => {
                     let i_value = self.index_register.get()?;
