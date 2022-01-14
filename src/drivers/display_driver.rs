@@ -4,7 +4,7 @@ use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 
-use chip8::{FRAME_BUFFER_HEIGHT, FRAME_BUFFER_LENGTH};
+use crate::cpu::{FRAME_BUFFER_HEIGHT, FRAME_BUFFER_LENGTH};
 
 const SCALE_FACTOR: u32 = 20;
 const SCREEN_WIDTH: u32 = (FRAME_BUFFER_LENGTH as u32) * SCALE_FACTOR;

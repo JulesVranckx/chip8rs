@@ -1,6 +1,8 @@
-use chip8::*;
 use clap::{Arg, App};
 use std::process;
+
+mod cpu;
+use cpu::{CPU, Instruction, FRAME_BUFFER_LENGTH, FRAME_BUFFER_HEIGHT};
 
 mod drivers;
 use drivers::{DisplayDriver, AudioDriver};
@@ -30,24 +32,16 @@ fn main() {
                   .help("input file as raw")
         )
         .get_matches();
-
-    // println!("WELCOME TO THE CHIP-8 EMULATOR");
-    // println!("\t[+] RAM SIZE: {}", chip8::MEMORY_SIZE);
-    let instr = Instruction::OR(7,0) ;
     
-    // match instr {
-    //     Instruction::OR(Vx, Vy) => {
-    //         println!("DEBUG: VX= {}, Vy:{}", Vx, Vy);
-    //     }
-    //     _ => ()
-    // };
 
-    
-    let sdl_context = sdl2::init().unwrap();
 
+    //Load arguments
     let filename = matches.value_of("file").unwrap();
     let bin = matches.is_present("raw input");
     let text = matches.is_present("text input");
+
+    // Set up drivers
+    let sdl_context = sdl2::init().unwrap();
     let audio_driver = AudioDriver::new(&sdl_context);
     let mut display_driver = DisplayDriver::new(&sdl_context);
     
@@ -105,6 +99,10 @@ fn main() {
 
         if let Ok(sound) = cpu.sound() {
             if sound {
+                audio_driver.start_beep();
+            }
+            else {
+                audio_driver.stop_beep();
             }
         }
 

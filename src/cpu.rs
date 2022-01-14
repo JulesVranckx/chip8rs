@@ -1,17 +1,375 @@
-use std::time::{Instant, Duration};
+#![allow(non_camel_case_types)]
+use std::time::Duration;
+use std::thread::sleep;
+use rand::Rng;
+use std::fs::File;
+use std::fs;
+use std::io::Read;
+use std::i64;
 
-mod setup ;
-mod registers;
-mod stack;
-mod ram;
-mod components;
+pub const MEMORY_SIZE: usize = 0x1000 ;
+pub const GP_REGISTERS_COUNT: usize = 16 ;
+pub const STACK_SIZE: usize = 16 ;
+pub const PROGRAM_START: usize = 0x200 ;
+pub const FRAME_BUFFER_LENGTH: usize = 64;
+pub const FRAME_BUFFER_HEIGHT: usize = 32;
+pub const DEFAULT_FREQUENCY: u32 = 600;
+pub const FONT_SET: [u8; 80] = [
+    0xF0,
+    0x90,
+    0x90,
+    0x90,
+    0xF0,
+    0x20,
+    0x60,
+    0x20,
+    0x20,
+    0x70,
+    0xF0,
+    0x10,
+    0xF0,
+    0x80,
+    0xF0,
+    0xF0,
+    0x10,
+    0xF0,
+    0x10,
+    0xF0,
+    0x90,
+    0x90,
+    0xF0,
+    0x10,
+    0x10,
+    0xF0,
+    0x80,
+    0xF0,
+    0x10,
+    0xF0,
+    0xF0,
+    0x80,
+    0xF0,
+    0x90,
+    0xF0,
+    0xF0,
+    0x10,
+    0x20,
+    0x40,
+    0x40,
+    0xF0,
+    0x90,
+    0xF0,
+    0x90,
+    0xF0,
+    0xF0,
+    0x90,
+    0xF0,
+    0x10,
+    0xF0,
+    0xF0,
+    0x90,
+    0xF0,
+    0x90,
+    0x90,
+    0xE0,
+    0x90,
+    0xE0,
+    0x90,
+    0xE0,
+    0xF0,
+    0x80,
+    0x80,
+    0x80,
+    0xF0,
+    0xE0,
+    0x90,
+    0x90,
+    0x90,
+    0xE0,
+    0xF0,
+    0x80,
+    0xF0,
+    0x80,
+    0xF0,
+    0xF0,
+    0x80,
+    0xF0,
+    0x80,
+    0x80,
+];
 
-use setup::types::{VIndex, VValue, Addr};
-use registers::Registers;
-use stack::Stack;
-use ram::Memory;
-use components::{ProgramCounter, DelayTimer, SoundTimer, IndexRegister, FrameBuffer};
+pub type Addr = usize ;
+pub type StackAdress = usize ;
+pub type VIndex = usize ;
+pub type CellValue = u8 ;
+pub type StackValue = Addr ;
+pub type VValue = u8 ;
 
+
+
+
+/// Registers strucure
+/// Holds a 16 bytes long array
+/// Defines methods to create a new instance, read from registers and write in it
+struct Registers{
+    regs: [VValue; GP_REGISTERS_COUNT]
+}
+
+impl Registers {
+    fn new() -> Registers {
+        Registers{
+            regs: [0; GP_REGISTERS_COUNT]
+        }
+    }
+
+    fn read(&self, index: VIndex) -> Result<VValue, &'static str>{
+        
+        if index >= GP_REGISTERS_COUNT - 1 {
+            return Err("Register index too high. Please use -c to see CHIP-8 caracteristics")
+        }
+        
+        Ok(self.regs[index])
+    }
+
+    fn write(&mut self, index: VIndex, value: VValue) -> Result<(), &'static str> {
+        
+        if index >= GP_REGISTERS_COUNT - 1 {
+            return Err("Register index too high. Please use -c to see CHIP-8 caracteristics")
+        }
+
+        self.regs[index] = value ;
+
+        Ok(())
+    }
+
+    fn set_f(&mut self) -> Result<(), &'static str> {
+        self.regs[15] = 1 ;
+        Ok(())
+    }
+
+    fn clr_f(&mut self) -> Result<(), &'static str> {
+        self.regs[15] &= 0x0 ;
+        Ok(())
+    }
+
+    // fn get_f(&self) -> Result<&VValue, &'static str> {
+    //     Ok(&self.regs[15])
+    // }
+}
+
+/// Memory structure
+struct Memory{
+    cells: [CellValue; MEMORY_SIZE]
+}
+
+impl Memory {
+    fn new() -> Memory {
+        Memory{
+            cells: [0; MEMORY_SIZE]
+        }
+    }
+
+    fn read(&self, index: Addr) -> Result<CellValue, &'static str>{
+        
+        if index >= MEMORY_SIZE {
+            return Err("Memory index too high. Please use -c to see CHIP-8 caracteristics")
+        }
+        
+        Ok(self.cells[index])
+    }
+
+    fn write(&mut self, index: Addr, value: CellValue) -> Result<(), &'static str> {
+        
+        if index >= MEMORY_SIZE {
+            return Err("Memory index too high. Please use -c to see CHIP-8 caracteristics")
+        }
+
+        self.cells[index] = value ;
+
+        Ok(())
+    }
+}
+
+/// Stack
+struct Stack {
+    cells: [StackValue; STACK_SIZE],
+    sp: StackAdress
+}
+
+impl Stack {
+
+    fn new() -> Stack {
+        Stack{
+            cells: [0; STACK_SIZE],
+            sp: 0
+        }
+    }
+
+    fn push(&mut self, value: StackValue) -> Result<(), &'static str> {
+        
+        if self.sp == STACK_SIZE {
+            return Err("Stack overflow")
+        }
+        
+        self.cells[self.sp] = value;
+        self.sp += 1;
+
+        Ok(())
+    }
+
+    fn pop(&mut self) -> Result<StackValue, &'static str> {
+
+        if self.sp == 0 {
+            return Err("Stack is empty, can't pop")
+        }
+
+        self.sp -= 1 ;
+        Ok(self.cells[self.sp-1])
+    }
+}
+
+/// Delay Timer
+struct DelayTimer {
+    value: u8
+}
+
+impl DelayTimer {
+
+    fn new() -> DelayTimer {
+        DelayTimer{value:0}
+    }
+    
+    fn decrease(&mut self) -> Result<(), &'static str> {
+        if self.value != 0 {
+            self.value -= 1;
+        }
+        Ok(())
+    }
+
+    fn get(&self) -> Result<u8, &'static str> {
+        Ok(self.value)
+    }
+
+    fn set(&mut self, value: u8) -> Result<(), &'static str> {
+        self.value = value;
+        Ok(())
+    }
+}
+
+/// Sound Timer
+struct SoundTimer{
+    value: u8
+}
+
+impl SoundTimer {
+
+    fn new() -> SoundTimer {
+        SoundTimer{value:0}
+    }
+
+    fn decrease(&mut self) -> Result<(), &'static str> {
+        if self.value != 0 {
+            self.value -= 1;
+        }
+        Ok(())
+    }
+
+    fn set(&mut self, value: u8) -> Result<(), &'static str> {
+        self.value = value;
+        Ok(())
+    }
+
+    fn get(&self) -> Result<u8, &'static str> {
+        Ok(self.value)
+    }
+
+}
+
+/// FrameBuffer
+struct FrameBuffer{
+    buffer: [[u8; FRAME_BUFFER_LENGTH]; FRAME_BUFFER_HEIGHT]
+}
+
+impl FrameBuffer {
+    
+    fn new() -> FrameBuffer {
+        FrameBuffer {
+            buffer: [[0; FRAME_BUFFER_LENGTH]; FRAME_BUFFER_HEIGHT]
+        }
+    }
+
+    fn write(&mut self, i: usize, j:usize, value:u8) -> Result<(), &'static str> {
+        self.buffer[i][j] = value ;
+        Ok(())
+    }
+
+    fn read(&self, i: usize, j:usize) -> Result<u8, &'static str>{
+        Ok(self.buffer[i][j])
+    }
+
+    fn full_image(&self) -> Result<&[[u8; FRAME_BUFFER_LENGTH]; FRAME_BUFFER_HEIGHT], &'static str> {
+        Ok(&self.buffer)
+    }
+}
+
+/// PC
+struct ProgramCounter {
+    register: Addr
+}
+
+impl ProgramCounter {
+
+    fn new() -> ProgramCounter {
+        ProgramCounter {
+            register: PROGRAM_START
+        }
+    }
+
+    fn incr(&mut self) -> Result<(), &'static str> {
+        if self.register == MEMORY_SIZE - 1 {
+            return Err("Program Counter Overflow")
+        }
+
+        self.register += 2 ;
+
+        Ok(())
+    }
+
+    fn change(&mut self, addr: Addr) -> Result<(), &'static str> {
+
+        if addr >= MEMORY_SIZE {
+            return Err("Trying to set program counter to code out of the memory")
+        }
+
+        self.register = addr ;
+
+        Ok(())
+    } 
+
+    fn get(&self) -> Addr {
+        self.register
+    }
+}
+
+/// I
+struct IndexRegister{
+    value: Addr
+}
+
+impl IndexRegister {
+
+    fn new() -> IndexRegister {
+        IndexRegister{value:0}
+    }
+
+    fn set(&mut self, value: Addr) -> Result<(), &'static str> {
+        self.value = value;
+        Ok(())
+    }
+
+    fn get(&self) -> Result<Addr, &'static str> {
+        Ok(self.value)
+    }
+}
 
 enum CpuState {
     IDLE,
@@ -20,7 +378,631 @@ enum CpuState {
     EXEC
 }
 
+/// CPU
+pub struct CPU {
+    on: bool,
+    ram: Memory,
+    v: Registers,
+    stack: Stack,
+    pc: ProgramCounter,
+    index_register: IndexRegister,
+    dt: DelayTimer,
+    st: SoundTimer,
+    frame_buff: FrameBuffer,
+    keyboard: u16,
+    frequency: u32,
+    frequency_counter: u32,
+    opcode: u16,
+    instr: Option<Instruction>,
+    state: CpuState,
+    refresh: bool,
+    sound: bool
+}
+
+impl CPU {
+
+    pub fn new(frequency: Option<u32>) -> CPU {
+
+        let frequency = match frequency {
+            Some(frequency) => frequency,
+            None => DEFAULT_FREQUENCY
+        };
+
+        CPU {
+            on: false,
+            ram: Memory::new(),
+            v: Registers::new(),
+            stack: Stack::new(),
+            pc: ProgramCounter::new(),
+            index_register: IndexRegister::new(),
+            dt: DelayTimer::new(),
+            st: SoundTimer::new(),
+            frame_buff: FrameBuffer::new(),
+            keyboard: 0,
+            frequency: frequency,
+            frequency_counter: 0u32,
+            opcode: 0,
+            instr: None,
+            state: CpuState::IDLE,
+            refresh: false,
+            sound: false
+        }
+    }
+
+    pub fn power_on(&mut self) {
+        self.on = true;
+        let mut base_addr = 0 as usize;
+        for chr in FONT_SET{
+            self.ram.write(base_addr, chr).unwrap();
+            base_addr += 1;
+        }
+    }
+
+    pub fn loadt(&mut self, filename: &str) -> Result<(), &'static str>{
+        let content = fs::read_to_string(filename).unwrap();
+        let mut i = PROGRAM_START ;
+        for line in content.lines() {
+            let opcode = i64::from_str_radix(line, 16).unwrap() as u16;
+            let l = ((opcode & 0xFF00) >> 8) as CellValue;
+            let r = (opcode & 0x00FF) as CellValue;
+            self.ram.write(i, l)?;
+            self.ram.write(i+1, r)?;
+            i += 2;
+        }
+        Ok(())
+    }
+
+    pub fn loadb(&mut self, filename: &str) -> Result<(), &'static str>{
+        let mut f = File::open(&filename).expect("no file found");
+        let metadata = fs::metadata(&filename).expect("unable to read metadata");
+        let mut buffer = vec![0; metadata.len() as usize];
+        f.read(&mut buffer).expect("buffer overflow");
+        let mut addr = PROGRAM_START;
+        for chunk in buffer {
+            self.ram.write(addr, chunk)?;
+            addr += 1; 
+        }
+        
+        Ok(())
+    }
+
+    pub fn consume_refresh(&mut self) -> Result<bool, &'static str>{
+        if self.refresh {
+            self.refresh = false;
+            Ok(true)
+        }
+        else{
+            Ok(false)
+        }
+    }
+
+    fn set_refresh(&mut self) -> Result<(), &'static str> {
+        self.refresh = true;
+        Ok(())
+    }
+
+    pub fn sound(&self) -> Result<bool, &'static str> {
+        Ok(self.sound)
+    }
+
+    pub fn  get_image(&self) -> Result<&[[u8; FRAME_BUFFER_LENGTH]; FRAME_BUFFER_HEIGHT], &'static str> {
+        self.frame_buff.full_image()
+    }
+
+    pub fn next_cycle(&mut self) -> Result<(), &'static str> {
+
+        if !self.on {
+            self.state = CpuState::IDLE ;
+        }
+        else {
+            match self.state {
+            
+                CpuState::IDLE => {
+                    self.state = CpuState::FETCH ;
+                },
+
+                CpuState::FETCH => {
+                    self.state = CpuState::DECODE ;
+                },
+                
+                CpuState::DECODE => {
+                    self.state = CpuState::EXEC;
+                },
+                
+                CpuState::EXEC => {
+                    self.state = CpuState::FETCH;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn simulate(&mut self) -> Result<(), &'static str> {
+
+        let mut simul_cycles: u64 = 1;
+        
+        //Perform state action
+        match self.state {
+            CpuState::IDLE => {},
+            
+            CpuState::FETCH => {
+                // println!("[+] fetching @{}", self.pc.get());
+                self.fetch()?;
+            }
+
+            CpuState::DECODE => {
+                // println!("[+] decoding #{}", self.opcode);
+                self.decode()?;
+            }
+
+            CpuState::EXEC => {
+                // if let Some(instr) = &self.instr {
+                // println!("[+] ccrt_instr: {:?}", instr);
+                //}
+                simul_cycles = self.execute()?;
+            }
+        };
+
+        let sleep_time = &simul_cycles * (1e6 as f64 / (self.frequency as f64)) as u64 ;
+
+        //Update the frequency counter for delay and sound registers
+        self.frequency_counter = (self.frequency_counter + simul_cycles as u32) % (self.frequency / 60) ;
+
+        if self.frequency_counter == 0 {
+            for _ in 0..simul_cycles {
+                self.st.decrease()?;
+                self.dt.decrease()?;
+            }
+        }
+
+        if self.st.get()? != 0 {
+            self.sound = true;
+        }
+        else {
+            self.sound = false;
+        }
+
+        sleep(Duration::from_micros(sleep_time));
+
+        Ok(())
+
+    }
+
+    fn fetch(&mut self) -> Result<(), &'static str> {
+        let pc_value = self.pc.get();
+        let l = self.ram.read(pc_value)? as u16;
+        let r = self.ram.read(pc_value + 1)? as u16;
+        self.opcode = (l<<8)+ r;
+        Ok(())  
+    }
+
+    fn decode(&mut self) -> Result<(), &'static str> {
+        
+        let bytes = (
+            ((self.opcode & 0xF000) >> 12)as u8,
+            ((self.opcode & 0x0F00) >> 8)as u8,
+            ((self.opcode & 0x00F0) >> 4)as u8,
+            (self.opcode & 0x000F) as u8
+        );
+
+        match bytes {
+
+            (0, 0, 0xE, 0) => {
+                self.instr = Some(Instruction::CLS) ;
+            },
+
+            (0,0,0xE, 0xE) => {
+                self.instr = Some(Instruction::RET) ;
+            },
+
+            (1,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::JP(addr));
+            },
+
+            (2,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::CALL(addr));
+            },
+
+            (3,x,_,_) => {
+                let k = (self.opcode & 0x00FF) as VValue;  
+                self.instr = Some(Instruction::SEi(x as VIndex, k));
+            },
+
+            (4,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue;  
+                self.instr = Some(Instruction::SNEi(x as VIndex, kk));  
+            },
+
+            (5,x,y,0) => {
+                self.instr = Some(Instruction::SE(x as VIndex,y as VIndex));
+            },
+
+            (6,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue; 
+                self.instr = Some(Instruction::LDi(x as VIndex, kk));
+            },
+
+            (7,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue; 
+                self.instr = Some(Instruction::ADDi(x as VIndex, kk));
+            },
+
+            (8,x,y,0) => {
+                self.instr = Some(Instruction::LD(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,1) => {
+                self.instr = Some(Instruction::OR(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,2) => {
+                self.instr = Some(Instruction::AND(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,3) => {
+                self.instr = Some(Instruction::XOR(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,4) => {
+                self.instr = Some(Instruction::ADD(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,5) => {
+                self.instr = Some(Instruction::SUB(x as VIndex,y as VIndex));
+            },
+
+            (8,x,_,6) => {
+                self.instr = Some(Instruction::SHR(x as VIndex));
+            },
+
+            (8,x,y,7) => {
+                self.instr = Some(Instruction::SUBN(x as VIndex,y as VIndex));
+            },
+
+            (8,x,_,0xE) => {
+                self.instr = Some(Instruction::SHL(x as VIndex));
+            },
+
+            (9,x,y,0) => {
+                self.instr = Some(Instruction::SNE(x as VIndex,y as VIndex));
+            },
+
+            (0xA,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::LD_I(addr));
+            },
+
+            (0xB,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::JP_V0(addr));
+            },
+
+            (0xC,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue; 
+                self.instr = Some(Instruction::RNDi(x as VIndex, kk));
+            },
+
+            (0xD,x,y,n) => {
+                self.instr = Some(Instruction::DRW(x as VIndex, y as VIndex, n));
+            },
+
+            (0xE, x, 9, 0xE) => {
+                self.instr = Some(Instruction::SKP(x as VIndex));
+            },
+
+            (0xE, x, 0xA, 1) => {
+                self.instr = Some(Instruction::SKNP(x as VIndex));
+            },
+
+            (0xF, x, 0, 7) => {
+                self.instr = Some(Instruction::LD_DT(x as VIndex));
+            },
+
+            (0xF, x, 0, 0xA) => {
+                self.instr = Some(Instruction::LD_K(x as VIndex));
+            },
+
+            (0xF, x, 1, 5) => {
+                self.instr = Some(Instruction::SET_DT(x as VIndex));
+            },
+
+            (0xF, x, 1, 8) => {
+                self.instr = Some(Instruction::SET_ST(x as VIndex));
+            },
+
+            (0xF, x, 1, 0xE) => {
+                self.instr = Some(Instruction::ADD_I(x as VIndex));
+            },
+
+            (0xF, x, 2, 9) => {
+                self.instr = Some(Instruction::LD_F(x as VIndex));
+            },
+
+            (0xF, x, 3, 3) => {
+                self.instr = Some(Instruction::LD_B(x as VIndex));
+            },
+
+            (0xF, x, 5, 5) => {
+                self.instr = Some(Instruction::ST_UNTIL(x as VIndex));
+            },
+
+            (0xF, x, 6, 5) => {
+                self.instr = Some(Instruction::LD_UNTIL(x as VIndex));
+            },
+
+            _ => {
+                return Err("Can't decode current instruction");
+            }
+        }
+        
+
+        Ok(())
+    }
+
+    fn execute(&mut self) -> Result<u64, &'static str> {
+        
+        let mut increase_pc = true ;
+        let mut cycles = 1;
+
+        if let Some(instr) = &self.instr {
+            
+            match instr {
+            
+                Instruction::SYS(_) => {
+                    return Err("SYS instruction no more supported");
+                }
+                Instruction::CLS => {
+                    for i in 0..FRAME_BUFFER_HEIGHT {
+                        for j in 0..FRAME_BUFFER_LENGTH {
+                            self.frame_buff.write(i,j,0)?;
+                        }
+                    }
+                }
+                Instruction::RET => {
+                    let tmp = self.stack.pop()?;
+                    self.pc.change(tmp)?;
+
+                }
+                Instruction::JP(addr) => {
+                    self.pc.change(*addr)?;
+                    increase_pc = false;
+                },
+                Instruction::CALL(addr) => {
+                    self.stack.push(self.pc.get())?;
+                    self.pc.change(*addr)?;
+                    increase_pc = false;            
+                },
+                Instruction::SEi(vx, kk) => {
+                    if self.v.read(*vx)? == *kk {
+                        self.pc.incr()?; 
+                    }
+                },
+
+                Instruction::SNEi(vx, kk) => {
+                    if self.v.read(*vx)? != *kk {
+                        self.pc.incr()?; 
+                    }
+                },
+
+                Instruction::SE(vx, vy) => {
+                    if self.v.read(*vx)? == self.v.read(*vy)? {
+                        self.pc.incr()?; 
+                    }
+                }
+
+                Instruction::LDi(vx,kk) => {
+                    self.v.write(*vx, *kk)?;
+                }
+
+                Instruction::ADDi(vx,kk) => {
+                    let v = self.v.read(*vx)?;
+                    self.v.write(*vx, v+*kk)?;
+                }
+
+                Instruction::SNE(vx,vy) => {
+                    if self.v.read(*vx)? != self.v.read(*vy)? {
+                        self.pc.incr()?; 
+                    }
+                }
+                Instruction::OR(vx,vy) => {
+                    let x = self.v.read(*vx)?;
+                    let y = self.v.read(*vy)?;
+                    let x = x | y ;
+                    self.v.write(*vx, x)?;
+                }
+                Instruction::AND(vx,vy) => {
+                    let x = self.v.read(*vx)?;
+                    let y = self.v.read(*vy)?;
+                    let x = x & y ;
+                    self.v.write(*vx, x)?;
+                }
+                Instruction::XOR(vx,vy) => {
+                    let x = self.v.read(*vx)?;
+                    let y = self.v.read(*vy)?;
+                    let x = x ^ y ;
+                    self.v.write(*vx, x)?;
+                }
+                Instruction::ADD(vx,vy) => {
+                    self.v.clr_f()?;
+                    let x = self.v.read(*vx)?;
+                    let y = self.v.read(*vy)?;
+                    let result = x as u16 + y as u16;
+                    self.v.write(*vx, (result & 0xFF) as CellValue)?;
+                    if result > 0xFF {
+                        self.v.set_f()?;
+                    }
+                }
+                Instruction::SUB(vx,vy) => {
+                    self.v.clr_f()?;
+                    let mut x = self.v.read(*vx)?;
+                    let mut y = self.v.read(*vy)?;
+                    if x <= y{
+                        let tmp = x;
+                        x = y;
+                        y = tmp;
+                    }
+                    else {
+                        self.v.set_f()?;
+                    }
+                    let result = x as u16 - y as u16;
+                    self.v.write(*vx, (result & 0xFF) as CellValue)?;
+                }
+                Instruction::SHR(vx) => {
+                    let mut x = self.v.read(*vx)?;
+                    if (x & 0x1) == 0x1 {
+                        self.v.set_f()?;
+                    }
+                    x = x >> 2 ;
+                    self.v.write(*vx,x)?;
+                }
+                Instruction::SUBN(vx,vy) => {
+                    self.v.clr_f()?;
+                    let mut x = self.v.read(*vx)?;
+                    let mut y = self.v.read(*vy)?;
+                    if y <= x{
+                        let tmp = x;
+                        x = y;
+                        y = tmp;
+                    }
+                    else {
+                        self.v.set_f()?;
+                    }
+                    let result = y as u16 - x as u16;
+                    self.v.write(*vx, (result & 0xFF) as CellValue)?;
+                }
+                Instruction::SHL(vx) => {
+                    let mut x = self.v.read(*vx)?;
+                    if ((x & 0b1000_0000) >> 7) == 0x1 {
+                        self.v.set_f()?;
+                    }
+                    x = x << 2 ;
+                    self.v.write(*vx,x)?;
+                }
+                Instruction::LD(vx,vy) => {
+                    let y = self.v.read(*vy)?;
+                    self.v.write(*vx, y)?;
+                }
+                Instruction::LD_I(addr) => {
+                    self.index_register.set(*addr)?;
+                }
+                Instruction::JP_V0(addr) => {
+                    let v0 = self.v.read(0)?;
+                    self.pc.change(*addr + v0 as Addr)?;
+                    increase_pc = false;
+                }
+                Instruction::RNDi(vx, kk) => {
+                    let mut rng = rand::thread_rng().gen_range(0..=255);
+                    rng = rng & *kk ;
+                    self.v.write(*vx, rng)?;
+                }
+                Instruction::DRW(vx,vy, n) => {
+                    let index = self.index_register.get()?;
+                    let mut set_f = 0;
+                    for i in 0..*n{
+                        let value = self.ram.read(index + i as usize)?;
+                        let y = (self.v.read(*vy)? + i)  as usize% FRAME_BUFFER_HEIGHT ;
+                        for j in 0..8 {
+                            let x = (self.v.read(*vx)? + j) as usize % FRAME_BUFFER_LENGTH ;
+                            let pixel = value >> (7-j) & 1;
+                            set_f |= pixel^self.frame_buff.read(y,x)?;
+                            self.frame_buff.write(y,x,pixel)?;
+                        }
+                        if set_f != 0{
+                            self.v.set_f()?;
+                        }
+                    }
+                    self.set_refresh()?;
+                }
+                Instruction::SKP(vx) => {
+                    let x = self.v.read(*vx)?;
+                    let skip = self.keyboard & (1<<x) ;
+                    if skip != 0 {
+                        self.pc.incr()?;
+                    }
+                }
+                Instruction::SKNP(vx) => {
+                    let x = self.v.read(*vx)?;
+                    let skip = self.keyboard & (1<<x) ;
+                    if skip == 0 {
+                        self.pc.incr()?;
+                    }
+                }
+                Instruction::LD_DT(vx) => {
+                    let dt_value = self.dt.get()?;
+                    self.v.write(*vx, dt_value)?;
+                }
+                Instruction::LD_K(vx) => {
+                    //TODO: Awful code, not working, consider changing it asap
+                    let key = (self.keyboard & 0x1) as CellValue;
+                    self.v.write(*vx, key)?;
+                }
+                Instruction::SET_DT(vx) => {
+                    let x = self.v.read(*vx)?;
+                    self.dt.set(x)?;
+                }
+                Instruction::SET_ST(vx) => {
+                    let x = self.v.read(*vx)?;
+                    self.st.set(x)?;
+                }
+                Instruction::ADD_I(vx) => {
+                    let mut i = self.index_register.get()?;
+                    let x = self.v.read(*vx)?;
+                    i += x as Addr;
+                    self.index_register.set(i)?;
+                }
+                Instruction::LD_F(vx) => {
+                    let i = *vx;
+                    self.index_register.set(i)?;
+                    println!("MAYBE ME?");
+                }
+                Instruction::LD_B(vx) => {
+                    let mut i = self.index_register.get()?;
+                    //x = bcd
+                    let x = self.v.read(*vx)?;
+                    let b = x / 100;
+                    let c = (x % 100) / 10 ;
+                    let d = x % 10;
+                    self.ram.write(i, b)?;
+                    i += 1;
+                    self.ram.write(i, c)?;
+                    i += 1;
+                    self.ram.write(i, d)?;   
+                    cycles = 3u64;                 
+                }
+                Instruction::ST_UNTIL(vx) => {
+                    let i_value = self.index_register.get()?;
+                    for i in 0..=*vx{
+                        let x = self.v.read(i as VIndex)?;
+                        self.ram.write(i_value + i, x)?;
+                    }
+                    cycles = *vx as u64;
+                }
+                Instruction::LD_UNTIL(vx) => {
+                    let i_value = self.index_register.get()?;
+                    for i in 0..=*vx{
+                        let value = self.ram.read(i_value + i)?;
+                        self.v.write(i, value)?;
+                    }
+                    cycles = *vx as u64 ;
+                }
+            }
+        }
+
+        if increase_pc {
+            self.pc.incr()?;
+        }
+
+        Ok(cycles)
+
+    }
+
+}
+
 /// Instruction Set
+#[derive(Debug)]
 pub enum Instruction {
     SYS(Addr),
     CLS,
@@ -38,12 +1020,12 @@ pub enum Instruction {
     XOR(VIndex, VIndex),
     ADD(VIndex, VIndex),
     SUB(VIndex, VIndex),
-    SHR(VIndex, VIndex),
+    SHR(VIndex),
     SUBN(VIndex, VIndex),
-    SHL(VIndex, VIndex),
+    SHL(VIndex),
     SNE(VIndex, VIndex),
     LD_I(Addr),
-    JP_VO(Addr),
+    JP_V0(Addr),
     RNDi(VIndex, VValue),
     DRW(VIndex, VIndex, u8),
     SKP(VIndex),
@@ -57,255 +1039,4 @@ pub enum Instruction {
     LD_B(VIndex),
     ST_UNTIL(VIndex),
     LD_UNTIL(VIndex)
-}
-
-
-/// CPU
-pub struct CPU {
-    on: bool,
-    ram: Memory,
-    v: Registers,
-    stack: Stack,
-    pc: ProgramCounter,
-    index_register: IndexRegister,
-    dt: DelayTimer,
-    st: SoundTimer,
-    frame_buff: FrameBuffer,
-    frequency: u32,
-    frequency_counter: u32,
-    opcode: CellValue,
-    instr: Option<Instruction>,
-    state: CpuState
-}
-
-impl CPU {
-
-    fn new(frequency: Option<u32>) -> CPU {
-
-        let frequency = match frequency {
-            Some(frequency) => frequency,
-            None => setup::DEFAULT_FREQUENCY
-        };
-
-        CPU {
-            on: false,
-            ram: Memory::new(),
-            v: Registers::new(),
-            stack: Stack::new(),
-            pc: ProgramCounter::new(),
-            index_register: IndexRegister::new(),
-            dt: DelayTimer::new(),
-            st: SoundTimer::new(),
-            frame_buff: FrameBuffer::new(),
-            frequency: frequency,
-            frequency_counter: 0u32,
-            opcode: 0,
-            instr: None,
-            state: CpuState::IDLE
-        }
-    }
-
-    fn next_cycle(&mut self) -> Result<(), &'static str> {
-
-        if off {
-            self.state == CpuState::IDLE ;
-        }
-        else match self.state {
-            CpuState::IDLE => {
-            self.state == CpuState::FETCH ;
-            }
-
-            CpuState::FETCH => {
-            self.state == CpuState::DECODE ;
-            }
-            
-            CpuState::DECODE => {
-            self.state == CpuState::EXEC;
-            }
-            
-            CpuState::EXEC => {
-            self.sate == CpuState::FETCH;
-        }
-
-        Ok(())
-    }
-
-    fn simulate(&mut self) -> Result<(), &'static str> {
-
-        let t1 = Instant::now();
-
-        //Update the frequency counter for delay and sound registers
-        self.frequency_counter = (self.frequency_counter + 1) % (frequency / 60) ;
-        
-        //Perform state action
-        match self.state {
-            CpuState::IDLE => {},
-            
-            CpuState::FETCH => {
-                self.fetch()?;
-            }
-
-            CpuState::DECODE => {
-                self.decode()?;
-            }
-
-            CpuState::EXEC => {
-                self.execute()?;
-            }
-        }
-
-        let t2 = t1.elapsed() ;
-
-        Ok(())
-
-    }
-
-    fn fetch(&self) -> Result<CellValue, &'static str> {
-        return Err("fetching not implemented")
-    }
-
-    fn decode(&self) -> Result<Instruction, &'static str> {
-        return Err("decoding not implemented")
-    }
-
-    fn execute(&mut self) -> Result<(), &'static str> {
-        
-        let mut increase_pc = true ;
-
-        match self.instr.unwrap() {
-            Instruction::SYS(_) => {
-                return Err("SYS instruction no more supported");
-            }
-
-            Instruction::CLS => {
-                return Err("NOT IMPLEMENTED YET");
-            }
-
-            Instruction::RET => {
-                let tmp = self.stack.pop()?;
-                self.pc.change(tmp);
-
-            }
-            Instruction::JP(addr) => {
-                self.pc.change(addr)?;
-                increase_pc = false;
-            },
-            Instruction::CALL(addr) => {
-                self.stack.push(self.pc.get())?;
-                self.pc.change(addr)?;
-                increase_pc = false;            
-            },
-            Instruction::SEi(vx, kk) => {
-                if self.v.read(vx)? == kk {
-                    self.pc.incr()?; 
-                }
-            },
-
-            Instruction::SNEi(vx, kk) => {
-                if self.v.read(vx)? != kk {
-                    self.pc.incr()?; 
-                }
-            },
-
-            Instruction::SE(vx, vy) => {
-                if self.v.read(vx)? == self.v.read(vy)? {
-                    self.pc.incr()?; 
-                }
-            }
-
-            Instruction::LDi(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::ADDi(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SE(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::LD(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::OR(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::AND(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::XOR(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::ADD(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SUB(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SHR(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SUBN(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SHL(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SNE(vx,vy) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::LD_I(addr) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::JP_VO(addr) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::RNDi(vx, kk) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::DRW(vx,vy, n) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SKP(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SKNP(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::LD_DT(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::LD_K(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SET_DT(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::SET_ST(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::ADD_I(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::LD_F(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::LD_B(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::ST_UNTIL(vx) => {
-                return Err("Not Implemented yet");
-            }
-            Instruction::LD_UNTIL(vx) => {
-                return Err("Not Implemented yet");
-            }
-            _ => ()
-        };
-
-        if increase_pc {
-            self.pc.incr()?;
-        }
-
-        Ok(())
-
-    }
-
 }
