@@ -1,7 +1,9 @@
 use std::time::Duration;
 use std::thread::sleep;
 use rand::Rng;
+use std::fs::File;
 use std::fs;
+use std::io::Read;
 use std::i64;
 
 pub const MEMORY_SIZE: usize = 0x1000 ;
@@ -337,7 +339,17 @@ impl CPU {
     }
 
     pub fn loadb(&mut self, filename: &str) -> Result<(), &'static str>{
-        Err("File loading not yet implemented")
+        let mut f = File::open(&filename).expect("no file found");
+        let metadata = fs::metadata(&filename).expect("unable to read metadata");
+        let mut buffer = vec![0; metadata.len() as usize];
+        f.read(&mut buffer).expect("buffer overflow");
+        let mut addr = PROGRAM_START;
+        for chunk in buffer {
+            self.ram.write(addr, chunk)?;
+            addr += 1; 
+        }
+        
+        Ok(())
     }
 
     pub fn next_cycle(&mut self) -> Result<(), &'static str> {
@@ -450,24 +462,133 @@ impl CPU {
             (3,x,_,_) => {
                 let k = (self.opcode & 0x00FF) as VValue;  
                 self.instr = Some(Instruction::SEi(x as VIndex, k));
-            }
+            },
 
             (4,x,_,_) => {
                 let kk = (self.opcode & 0x00FF) as VValue;  
                 self.instr = Some(Instruction::SNEi(x as VIndex, kk));  
-            }
+            },
 
             (5,x,y,0) => {
-                self.instr = Some(Instruction::SE(x,y));
-            }
+                self.instr = Some(Instruction::SE(x as VIndex,y as VIndex));
+            },
 
             (6,x,_,_) => {
                 let kk = (self.opcode & 0x00FF) as VValue; 
-                self.instr = Some(Instruction::LDi(x, kk));
+                self.instr = Some(Instruction::LDi(x as VIndex, kk));
+            },
 
+            (7,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue; 
+                self.instr = Some(Instruction::ADDi(x as VIndex, kk));
+            },
+
+            (8,x,y,0) => {
+                self.instr = Some(Instruction::LD(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,1) => {
+                self.instr = Some(Instruction::OR(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,2) => {
+                self.instr = Some(Instruction::AND(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,3) => {
+                self.instr = Some(Instruction::XOR(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,4) => {
+                self.instr = Some(Instruction::ADD(x as VIndex,y as VIndex));
+            },
+
+            (8,x,y,5) => {
+                self.instr = Some(Instruction::SUB(x as VIndex,y as VIndex));
+            },
+
+            (8,x,_,6) => {
+                self.instr = Some(Instruction::SHR(x as VIndex));
+            },
+
+            (8,x,y,7) => {
+                self.instr = Some(Instruction::SUBN(x as VIndex,y as VIndex));
+            },
+
+            (8,x,_,0xE) => {
+                self.instr = Some(Instruction::SHL(x as VIndex));
+            },
+
+            (9,x,y,0) => {
+                self.instr = Some(Instruction::SNE(x as VIndex,y as VIndex));
+            },
+
+            (0xA,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::LD_I(addr));
+            },
+
+            (0xB,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::JP_V0(addr));
+            },
+
+            (0xC,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue; 
+                self.instr = Some(Instruction::RNDi(x as VIndex, kk));
+            },
+
+            (0xD,x,y,n) => {
+                self.instr = Some(Instruction::DRW(x as VIndex, y as VIndex, n));
+            },
+
+            (0xE, x, 9, 0xE) => {
+                self.instr = Some(Instruction::SKP(x as VIndex));
+            },
+
+            (0xE, x, 0xA, 1) => {
+                self.instr = Some(Instruction::SKNP(x as VIndex));
+            },
+
+            (0xF, x, 0, 7) => {
+                self.instr = Some(Instruction::LD_DT(x as VIndex));
+            },
+
+            (0xF, x, 0, 0xA) => {
+                self.instr = Some(Instruction::LD_K(x as VIndex));
+            },
+
+            (0xF, x, 1, 5) => {
+                self.instr = Some(Instruction::SET_DT(x as VIndex));
+            },
+
+            (0xF, x, 1, 8) => {
+                self.instr = Some(Instruction::SET_ST(x as VIndex));
+            },
+
+            (0xF, x, 1, 0xE) => {
+                self.instr = Some(Instruction::ADD_I(x as VIndex));
+            },
+
+            (0xF, x, 2, 9) => {
+                self.instr = Some(Instruction::LD_F(x as VIndex));
+            },
+
+            (0xF, x, 3, 3) => {
+                self.instr = Some(Instruction::LD_B(x as VIndex));
+            },
+
+            (0xF, x, 5, 5) => {
+                self.instr = Some(Instruction::ST_UNTIL(x as VIndex));
+            },
+
+            (0xF, x, 6, 5) => {
+                self.instr = Some(Instruction::LD_UNTIL(x as VIndex));
+            },
+
+            _ => {
+                return Err("Can't decode current instruction");
             }
-
-            _ => {}
         }
         
 
@@ -615,7 +736,7 @@ impl CPU {
                 Instruction::LD_I(addr) => {
                     self.index_register.set(*addr)?;
                 }
-                Instruction::JP_VO(addr) => {
+                Instruction::JP_V0(addr) => {
                     let v0 = self.v.read(0)?;
                     self.pc.change(*addr + v0 as Addr)?;
                     increase_pc = false;
@@ -697,7 +818,9 @@ impl CPU {
                         self.v.write(i, value)?;
                     }
                 }
-                _ => ()
+                _ => {
+                    return Err("Unsupported Instruction");
+                }
             }
         }
 
@@ -735,7 +858,7 @@ pub enum Instruction {
     SHL(VIndex),
     SNE(VIndex, VIndex),
     LD_I(Addr),
-    JP_VO(Addr),
+    JP_V0(Addr),
     RNDi(VIndex, VValue),
     DRW(VIndex, VIndex, u8),
     SKP(VIndex),

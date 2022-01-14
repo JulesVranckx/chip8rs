@@ -21,7 +21,7 @@ fn main() {
 
     let mut cpu = CPU::new(None);
 
-    match cpu.loadt("example.txt"){
+    match cpu.loadb("example.raw"){
         Ok(_) => {},
         Err(e) => {
             panic!("{}", e);
