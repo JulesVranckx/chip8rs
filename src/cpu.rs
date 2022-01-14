@@ -760,10 +760,12 @@ impl CPU {
                             self.frame_buff.write(i,j,0)?;
                         }
                     }
+                    self.set_refresh()?;
                 }
                 Instruction::RET => {
                     let tmp = self.stack.pop()?;
                     self.pc.change(tmp)?;
+                    increase_pc = false;
 
                 }
                 Instruction::JP(addr) => {
@@ -771,7 +773,7 @@ impl CPU {
                     increase_pc = false;
                 },
                 Instruction::CALL(addr) => {
-                    self.stack.push(self.pc.get())?;
+                    self.stack.push(self.pc.get() + 2)?;
                     self.pc.change(*addr)?;
                     increase_pc = false;            
                 },
@@ -780,28 +782,23 @@ impl CPU {
                         self.pc.incr()?; 
                     }
                 },
-
                 Instruction::SNEi(vx, kk) => {
                     if self.v.read(*vx)? != *kk {
                         self.pc.incr()?; 
                     }
                 },
-
                 Instruction::SE(vx, vy) => {
                     if self.v.read(*vx)? == self.v.read(*vy)? {
                         self.pc.incr()?; 
                     }
                 }
-
                 Instruction::LDi(vx,kk) => {
                     self.v.write(*vx, *kk)?;
                 }
-
                 Instruction::ADDi(vx,kk) => {
                     let v = self.v.read(*vx)?;
                     self.v.write(*vx, v+*kk)?;
                 }
-
                 Instruction::SNE(vx,vy) => {
                     if self.v.read(*vx)? != self.v.read(*vy)? {
                         self.pc.incr()?; 
@@ -840,9 +837,6 @@ impl CPU {
                     let mut x = self.v.read(*vx)?;
                     let mut y = self.v.read(*vy)?;
                     if x <= y{
-                        let tmp = x;
-                        x = y;
-                        y = tmp;
                     }
                     else {
                         self.v.set_f()?;
@@ -855,7 +849,7 @@ impl CPU {
                     if (x & 0x1) == 0x1 {
                         self.v.set_f()?;
                     }
-                    x = x >> 2 ;
+                    x = x >> 1 ;
                     self.v.write(*vx,x)?;
                 }
                 Instruction::SUBN(vx,vy) => {
@@ -863,9 +857,6 @@ impl CPU {
                     let mut x = self.v.read(*vx)?;
                     let mut y = self.v.read(*vy)?;
                     if y <= x{
-                        let tmp = x;
-                        x = y;
-                        y = tmp;
                     }
                     else {
                         self.v.set_f()?;
@@ -878,7 +869,7 @@ impl CPU {
                     if ((x & 0b1000_0000) >> 7) == 0x1 {
                         self.v.set_f()?;
                     }
-                    x = x << 2 ;
+                    x = x << 1 ;
                     self.v.write(*vx,x)?;
                 }
                 Instruction::LD(vx,vy) => {
@@ -907,8 +898,9 @@ impl CPU {
                         for j in 0..8 {
                             let x = (self.v.read(*vx)? + j) as usize % FRAME_BUFFER_LENGTH ;
                             let pixel = value >> (7-j) & 1;
-                            set_f |= pixel^self.frame_buff.read(y,x)?;
-                            self.frame_buff.write(y,x,pixel)?;
+                            let old_value = self.frame_buff.read(y,x)?;
+                            set_f |= pixel^old_value;
+                            self.frame_buff.write(y,x,pixel^old_value)?;
                         }
                         if set_f != 0{
                             self.v.set_f()?;
