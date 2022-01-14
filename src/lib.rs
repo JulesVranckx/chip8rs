@@ -10,9 +10,91 @@ pub const MEMORY_SIZE: usize = 0x1000 ;
 pub const GP_REGISTERS_COUNT: usize = 16 ;
 pub const STACK_SIZE: usize = 16 ;
 pub const PROGRAM_START: usize = 0x200 ;
-pub const FRAME_BUFFER_LENGTH: usize = 8;
+pub const FRAME_BUFFER_LENGTH: usize = 64;
 pub const FRAME_BUFFER_HEIGHT: usize = 32;
 pub const DEFAULT_FREQUENCY: u32 = 600;
+pub const FONT_SET: [u8; 80] = [
+    0xF0,
+    0x90,
+    0x90,
+    0x90,
+    0xF0,
+    0x20,
+    0x60,
+    0x20,
+    0x20,
+    0x70,
+    0xF0,
+    0x10,
+    0xF0,
+    0x80,
+    0xF0,
+    0xF0,
+    0x10,
+    0xF0,
+    0x10,
+    0xF0,
+    0x90,
+    0x90,
+    0xF0,
+    0x10,
+    0x10,
+    0xF0,
+    0x80,
+    0xF0,
+    0x10,
+    0xF0,
+    0xF0,
+    0x80,
+    0xF0,
+    0x90,
+    0xF0,
+    0xF0,
+    0x10,
+    0x20,
+    0x40,
+    0x40,
+    0xF0,
+    0x90,
+    0xF0,
+    0x90,
+    0xF0,
+    0xF0,
+    0x90,
+    0xF0,
+    0x10,
+    0xF0,
+    0xF0,
+    0x90,
+    0xF0,
+    0x90,
+    0x90,
+    0xE0,
+    0x90,
+    0xE0,
+    0x90,
+    0xE0,
+    0xF0,
+    0x80,
+    0x80,
+    0x80,
+    0xF0,
+    0xE0,
+    0x90,
+    0x90,
+    0x90,
+    0xE0,
+    0xF0,
+    0x80,
+    0xF0,
+    0x80,
+    0xF0,
+    0xF0,
+    0x80,
+    0xF0,
+    0x80,
+    0x80,
+];
 
 pub type Addr = usize ;
 pub type StackAdress = usize ;
@@ -20,6 +102,9 @@ pub type VIndex = usize ;
 pub type CellValue = u8 ;
 pub type StackValue = Addr ;
 pub type VValue = u8 ;
+
+
+
 
 /// Registers strucure
 /// Holds a 16 bytes long array
@@ -57,6 +142,11 @@ impl Registers {
 
     fn set_f(&mut self) -> Result<(), &'static str> {
         self.regs[15] = 1 ;
+        Ok(())
+    }
+
+    fn clr_f(&mut self) -> Result<(), &'static str> {
+        self.regs[15] &= 0x0 ;
         Ok(())
     }
 
@@ -182,14 +272,15 @@ impl SoundTimer {
         Ok(())
     }
 
-    fn sound(&self) -> Result<(), &'static str> {
-        return Err("Sound not implemented yet");
-    }
-
     fn set(&mut self, value: u8) -> Result<(), &'static str> {
         self.value = value;
         Ok(())
     }
+
+    fn get(&self) -> Result<u8, &'static str> {
+        Ok(self.value)
+    }
+
 }
 
 /// FrameBuffer
@@ -203,6 +294,19 @@ impl FrameBuffer {
         FrameBuffer {
             buffer: [[0; FRAME_BUFFER_LENGTH]; FRAME_BUFFER_HEIGHT]
         }
+    }
+
+    fn write(&mut self, i: usize, j:usize, value:u8) -> Result<(), &'static str> {
+        self.buffer[i][j] = value ;
+        Ok(())
+    }
+
+    fn read(&self, i: usize, j:usize) -> Result<u8, &'static str>{
+        Ok(self.buffer[i][j])
+    }
+
+    fn full_image(&self) -> Result<&[[u8; FRAME_BUFFER_LENGTH]; FRAME_BUFFER_HEIGHT], &'static str> {
+        Ok(&self.buffer)
     }
 }
 
@@ -289,7 +393,9 @@ pub struct CPU {
     frequency_counter: u32,
     opcode: u16,
     instr: Option<Instruction>,
-    state: CpuState
+    state: CpuState,
+    refresh: bool,
+    sound: bool
 }
 
 impl CPU {
@@ -316,12 +422,19 @@ impl CPU {
             frequency_counter: 0u32,
             opcode: 0,
             instr: None,
-            state: CpuState::IDLE
+            state: CpuState::IDLE,
+            refresh: false,
+            sound: false
         }
     }
 
     pub fn power_on(&mut self) {
         self.on = true;
+        let mut base_addr = 0 as usize;
+        for chr in FONT_SET{
+            self.ram.write(base_addr, chr).unwrap();
+            base_addr += 1;
+        }
     }
 
     pub fn loadt(&mut self, filename: &str) -> Result<(), &'static str>{
@@ -350,6 +463,29 @@ impl CPU {
         }
         
         Ok(())
+    }
+
+    pub fn consume_refresh(&mut self) -> Result<bool, &'static str>{
+        if self.refresh {
+            self.refresh = false;
+            Ok(true)
+        }
+        else{
+            Ok(false)
+        }
+    }
+
+    fn set_refresh(&mut self) -> Result<(), &'static str> {
+        self.refresh = true;
+        Ok(())
+    }
+
+    pub fn sound(&self) -> Result<bool, &'static str> {
+        Ok(self.sound)
+    }
+
+    pub fn  get_image(&self) -> Result<&[[u8; FRAME_BUFFER_LENGTH]; FRAME_BUFFER_HEIGHT], &'static str> {
+        self.frame_buff.full_image()
     }
 
     pub fn next_cycle(&mut self) -> Result<(), &'static str> {
@@ -383,8 +519,7 @@ impl CPU {
 
     pub fn simulate(&mut self) -> Result<(), &'static str> {
 
-        //Update the frequency counter for delay and sound registers
-        self.frequency_counter = (self.frequency_counter + 1) % (self.frequency / 60) ;
+        let mut simul_cycles: u64 = 1;
         
         //Perform state action
         match self.state {
@@ -404,17 +539,28 @@ impl CPU {
                 if let Some(instr) = &self.instr {
                 println!("[+] ccrt_instr: {:?}", instr);
                 }
-                self.execute()?;
+                simul_cycles = self.execute()?;
             }
         };
 
-        let sleep_time: u64 = (1e6 as f64 / (self.frequency as f64)) as u64 ;
+        let sleep_time = &simul_cycles * (1e6 as f64 / (self.frequency as f64)) as u64 ;
+
+        //Update the frequency counter for delay and sound registers
+        self.frequency_counter = (self.frequency_counter + simul_cycles as u32) % (self.frequency / 1) ;
 
         if self.frequency_counter == 0 {
-            
+            for i in 0..simul_cycles {
+                self.st.decrease()?;
+                self.dt.decrease()?;
+            }
         }
 
-        self.st.sound();
+        if self.st.get()? != 0 {
+            self.sound = true;
+        }
+        else {
+            self.sound = false;
+        }
 
         sleep(Duration::from_micros(sleep_time));
 
@@ -595,9 +741,10 @@ impl CPU {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<(), &'static str> {
+    fn execute(&mut self) -> Result<u64, &'static str> {
         
         let mut increase_pc = true ;
+        let mut cycles = 1;
 
         if let Some(instr) = &self.instr {
             
@@ -607,11 +754,15 @@ impl CPU {
                     return Err("SYS instruction no more supported");
                 }
                 Instruction::CLS => {
-                    return Err("NOT IMPLEMENTED YET");
+                    for i in 0..FRAME_BUFFER_HEIGHT {
+                        for j in 0..FRAME_BUFFER_LENGTH {
+                            self.frame_buff.write(i,j,0)?;
+                        }
+                    }
                 }
                 Instruction::RET => {
                     let tmp = self.stack.pop()?;
-                    self.pc.change(tmp);
+                    self.pc.change(tmp)?;
 
                 }
                 Instruction::JP(addr) => {
@@ -644,15 +795,12 @@ impl CPU {
                 Instruction::LDi(vx,kk) => {
                     self.v.write(*vx, *kk)?;
                 }
+
                 Instruction::ADDi(vx,kk) => {
                     let v = self.v.read(*vx)?;
                     self.v.write(*vx, v+*kk)?;
                 }
-                Instruction::SE(vx,vy) => {
-                    if self.v.read(*vx)? == self.v.read(*vy)? {
-                        self.pc.incr()?; 
-                    }
-                }
+
                 Instruction::SNE(vx,vy) => {
                     if self.v.read(*vx)? != self.v.read(*vy)? {
                         self.pc.incr()?; 
@@ -677,6 +825,7 @@ impl CPU {
                     self.v.write(*vx, x)?;
                 }
                 Instruction::ADD(vx,vy) => {
+                    self.v.clr_f()?;
                     let x = self.v.read(*vx)?;
                     let y = self.v.read(*vy)?;
                     let result = x as u16 + y as u16;
@@ -686,6 +835,7 @@ impl CPU {
                     }
                 }
                 Instruction::SUB(vx,vy) => {
+                    self.v.clr_f()?;
                     let mut x = self.v.read(*vx)?;
                     let mut y = self.v.read(*vy)?;
                     if x <= y{
@@ -708,6 +858,7 @@ impl CPU {
                     self.v.write(*vx,x)?;
                 }
                 Instruction::SUBN(vx,vy) => {
+                    self.v.clr_f()?;
                     let mut x = self.v.read(*vx)?;
                     let mut y = self.v.read(*vy)?;
                     if y <= x{
@@ -747,7 +898,23 @@ impl CPU {
                     self.v.write(*vx, rng)?;
                 }
                 Instruction::DRW(vx,vy, n) => {
-                    return Err("Not Implemented yet");
+                    let index = self.index_register.get()?;
+                    let mut set_f = 0;
+                    for i in 0..*n{
+                        let value = self.ram.read(index + i as usize)?;
+                        let y = (self.v.read(*vy)? + i)  as usize% FRAME_BUFFER_HEIGHT ;
+                        for j in 0..8 {
+                            let x = (self.v.read(*vx)? + j) as usize % FRAME_BUFFER_LENGTH ;
+                            println!("x: {}, y: {}", x, y);
+                            let pixel = value >> (7-j) & 1;
+                            set_f |= (pixel^self.frame_buff.read(y,x)?);
+                            self.frame_buff.write(y,x,pixel)?;
+                        }
+                        if set_f != 0{
+                            self.v.set_f()?;
+                        }
+                    }
+                    self.set_refresh();
                 }
                 Instruction::SKP(vx) => {
                     let x = self.v.read(*vx)?;
@@ -801,25 +968,24 @@ impl CPU {
                     i += 1;
                     self.ram.write(i, c)?;
                     i += 1;
-                    self.ram.write(i, d)?;                    
+                    self.ram.write(i, d)?;   
+                    cycles = 3u64;                 
                 }
                 Instruction::ST_UNTIL(vx) => {
-                    let mut i_value = self.index_register.get()?;
+                    let i_value = self.index_register.get()?;
                     for i in 0..=*vx{
                         let x = self.v.read(i as VIndex)?;
                         self.ram.write(i_value + i, x)?;
-                        i_value += 1;
                     }
+                    cycles = *vx as u64
                 }
                 Instruction::LD_UNTIL(vx) => {
-                    let mut i_value = self.index_register.get()?;
+                    let i_value = self.index_register.get()?;
                     for i in 0..=*vx{
                         let value = self.ram.read(i_value + i)?;
                         self.v.write(i, value)?;
                     }
-                }
-                _ => {
-                    return Err("Unsupported Instruction");
+                    cycles = *vx as u64 ;
                 }
             }
         }
@@ -828,7 +994,7 @@ impl CPU {
             self.pc.incr()?;
         }
 
-        Ok(())
+        Ok(cycles)
 
     }
 
