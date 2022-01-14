@@ -1,8 +1,10 @@
 use std::time::Duration;
 use std::thread::sleep;
 use rand::Rng;
+use std::fs;
+use std::i64;
 
-pub const MEMORY_SIZE: usize = 0xFFF ;
+pub const MEMORY_SIZE: usize = 0x1000 ;
 pub const GP_REGISTERS_COUNT: usize = 16 ;
 pub const STACK_SIZE: usize = 16 ;
 pub const PROGRAM_START: usize = 0x200 ;
@@ -153,6 +155,11 @@ impl DelayTimer {
     fn get(&self) -> Result<u8, &'static str> {
         Ok(self.value)
     }
+
+    fn set(&mut self, value: u8) -> Result<(), &'static str> {
+        self.value = value;
+        Ok(())
+    }
 }
 
 /// Sound Timer
@@ -175,6 +182,11 @@ impl SoundTimer {
 
     fn sound(&self) -> Result<(), &'static str> {
         return Err("Sound not implemented yet");
+    }
+
+    fn set(&mut self, value: u8) -> Result<(), &'static str> {
+        self.value = value;
+        Ok(())
     }
 }
 
@@ -246,6 +258,10 @@ impl IndexRegister {
         self.value = value;
         Ok(())
     }
+
+    fn get(&self) -> Result<Addr, &'static str> {
+        Ok(self.value)
+    }
 }
 
 enum CpuState {
@@ -269,7 +285,7 @@ pub struct CPU {
     keyboard: u16,
     frequency: u32,
     frequency_counter: u32,
-    opcode: CellValue,
+    opcode: u16,
     instr: Option<Instruction>,
     state: CpuState
 }
@@ -307,7 +323,17 @@ impl CPU {
     }
 
     pub fn loadt(&mut self, filename: &str) -> Result<(), &'static str>{
-        Err("FIle loading not implemented yet")
+        let content = fs::read_to_string(filename).unwrap();
+        let mut i = PROGRAM_START ;
+        for line in content.lines() {
+            let opcode = i64::from_str_radix(line, 16).unwrap() as u16;
+            let l = ((opcode & 0xFF00) >> 8) as CellValue;
+            let r = (opcode & 0x00FF) as CellValue;
+            self.ram.write(i, l)?;
+            self.ram.write(i+1, r)?;
+            i += 2;
+        }
+        Ok(())
     }
 
     pub fn loadb(&mut self, filename: &str) -> Result<(), &'static str>{
@@ -353,14 +379,19 @@ impl CPU {
             CpuState::IDLE => {},
             
             CpuState::FETCH => {
+                println!("[+] fetching @{}", self.pc.get());
                 self.fetch()?;
             }
 
             CpuState::DECODE => {
+                println!("[+] decoding #{}", self.opcode);
                 self.decode()?;
             }
 
             CpuState::EXEC => {
+                if let Some(instr) = &self.instr {
+                println!("[+] ccrt_instr: {:?}", instr);
+                }
                 self.execute()?;
             }
         };
@@ -368,7 +399,7 @@ impl CPU {
         let sleep_time: u64 = (1e6 as f64 / (self.frequency as f64)) as u64 ;
 
         if self.frequency_counter == 0 {
-            return Err("Internal register gestion not implemented");
+            
         }
 
         self.st.sound();
@@ -379,12 +410,68 @@ impl CPU {
 
     }
 
-    fn fetch(&self) -> Result<CellValue, &'static str> {
-        return Err("fetching not implemented")
+    fn fetch(&mut self) -> Result<(), &'static str> {
+        let pc_value = self.pc.get();
+        let l = self.ram.read(pc_value)? as u16;
+        let r = self.ram.read(pc_value + 1)? as u16;
+        self.opcode = (l<<8)+ r;
+        Ok(())  
     }
 
-    fn decode(&self) -> Result<Instruction, &'static str> {
-        return Err("decoding not implemented")
+    fn decode(&mut self) -> Result<(), &'static str> {
+        
+        let bytes = (
+            ((self.opcode & 0xF000) >> 12)as u8,
+            ((self.opcode & 0x0F00) >> 8)as u8,
+            ((self.opcode & 0x00F0) >> 4)as u8,
+            (self.opcode & 0x000F) as u8
+        );
+
+        match bytes {
+
+            (0, 0, 0xE, 0) => {
+                self.instr = Some(Instruction::CLS) ;
+            },
+
+            (0,0,0xE, 0xE) => {
+                self.instr = Some(Instruction::RET) ;
+            },
+
+            (1,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::JP(addr));
+            },
+
+            (2,_,_,_) => {
+                let addr = (self.opcode & 0x0FFF) as Addr;
+                self.instr = Some(Instruction::CALL(addr));
+            },
+
+            (3,x,_,_) => {
+                let k = (self.opcode & 0x00FF) as VValue;  
+                self.instr = Some(Instruction::SEi(x as VIndex, k));
+            }
+
+            (4,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue;  
+                self.instr = Some(Instruction::SNEi(x as VIndex, kk));  
+            }
+
+            (5,x,y,0) => {
+                self.instr = Some(Instruction::SE(x,y));
+            }
+
+            (6,x,_,_) => {
+                let kk = (self.opcode & 0x00FF) as VValue; 
+                self.instr = Some(Instruction::LDi(x, kk));
+
+            }
+
+            _ => {}
+        }
+        
+
+        Ok(())
     }
 
     fn execute(&mut self) -> Result<(), &'static str> {
@@ -472,7 +559,7 @@ impl CPU {
                     let x = self.v.read(*vx)?;
                     let y = self.v.read(*vy)?;
                     let result = x as u16 + y as u16;
-                    self.v.write(*vx, (result & 0xFF) as u8)?;
+                    self.v.write(*vx, (result & 0xFF) as CellValue)?;
                     if result > 0xFF {
                         self.v.set_f()?;
                     }
@@ -489,7 +576,7 @@ impl CPU {
                         self.v.set_f()?;
                     }
                     let result = x as u16 - y as u16;
-                    self.v.write(*vx, (result & 0xFF) as u8)?;
+                    self.v.write(*vx, (result & 0xFF) as CellValue)?;
                 }
                 Instruction::SHR(vx) => {
                     let mut x = self.v.read(*vx)?;
@@ -511,7 +598,7 @@ impl CPU {
                         self.v.set_f()?;
                     }
                     let result = y as u16 - x as u16;
-                    self.v.write(*vx, (result & 0xFF) as u8)?;
+                    self.v.write(*vx, (result & 0xFF) as CellValue)?;
                 }
                 Instruction::SHL(vx) => {
                     let mut x = self.v.read(*vx)?;
@@ -530,7 +617,7 @@ impl CPU {
                 }
                 Instruction::JP_VO(addr) => {
                     let v0 = self.v.read(0)?;
-                    self.pc.change(*addr + v0 as usize)?;
+                    self.pc.change(*addr + v0 as Addr)?;
                     increase_pc = false;
                 }
                 Instruction::RNDi(vx, kk) => {
@@ -560,28 +647,55 @@ impl CPU {
                     self.v.write(*vx, dt_value)?;
                 }
                 Instruction::LD_K(vx) => {
-                    return Err("Not Implemented yet");
+                    //TODO: Awful code, not working, consider changing it asap
+                    let key = (self.keyboard & 0x1) as CellValue;
+                    self.v.write(*vx, key)?;
                 }
                 Instruction::SET_DT(vx) => {
-                    return Err("Not Implemented yet");
+                    let x = self.v.read(*vx)?;
+                    self.dt.set(x)?;
                 }
                 Instruction::SET_ST(vx) => {
-                    return Err("Not Implemented yet");
+                    let x = self.v.read(*vx)?;
+                    self.st.set(x)?;
                 }
                 Instruction::ADD_I(vx) => {
-                    return Err("Not Implemented yet");
+                    let mut i = self.index_register.get()?;
+                    let x = self.v.read(*vx)?;
+                    i += x as Addr;
+                    self.index_register.set(i)?;
                 }
                 Instruction::LD_F(vx) => {
-                    return Err("Not Implemented yet");
+                    let i = 0x0;
+                    self.index_register.set(i)?;
                 }
                 Instruction::LD_B(vx) => {
-                    return Err("Not Implemented yet");
+                    let mut i = self.index_register.get()?;
+                    //x = bcd
+                    let x = self.v.read(*vx)?;
+                    let b = x / 100;
+                    let c = (x % 100) / 10 ;
+                    let d = x % 10;
+                    self.ram.write(i, b)?;
+                    i += 1;
+                    self.ram.write(i, c)?;
+                    i += 1;
+                    self.ram.write(i, d)?;                    
                 }
                 Instruction::ST_UNTIL(vx) => {
-                    return Err("Not Implemented yet");
+                    let mut i_value = self.index_register.get()?;
+                    for i in 0..=*vx{
+                        let x = self.v.read(i as VIndex)?;
+                        self.ram.write(i_value + i, x)?;
+                        i_value += 1;
+                    }
                 }
                 Instruction::LD_UNTIL(vx) => {
-                    return Err("Not Implemented yet");
+                    let mut i_value = self.index_register.get()?;
+                    for i in 0..=*vx{
+                        let value = self.ram.read(i_value + i)?;
+                        self.v.write(i, value)?;
+                    }
                 }
                 _ => ()
             }
@@ -597,8 +711,8 @@ impl CPU {
 
 }
 
-
 /// Instruction Set
+#[derive(Debug)]
 pub enum Instruction {
     SYS(Addr),
     CLS,
@@ -636,44 +750,3 @@ pub enum Instruction {
     ST_UNTIL(VIndex),
     LD_UNTIL(VIndex)
 }
-
-// fn CPU_execute_single(instr: &Instruction) -> Result<(), io::Error> {
-
-//     
-// }
-
-// #[cfg(test)]
-// mod test {
-//     use super::*;
-
-//     #[test]
-//     fn execute_JP() {
-//         let instr = Instruction::JP(0x100);
-
-//         CPU_execute_single(&instr);
-
-//         unsafe{
-//             assert_eq!(PC, 0x100);
-//         }
-//     }
-
-//     #[test]
-//     fn execute_CALL() {
-//         let instr = Instruction::CALL(0x100);
-
-//         let previous_pc;
-//         let previous_sp;
-//         unsafe{
-//             previous_sp = STACK_POINTER ;
-//             previous_pc = PC;
-//         }
-
-//         CPU_execute_single(&instr);
-
-//         unsafe{
-//             assert_eq!(PC, 0x100);
-//             assert_eq!(STACK[STACK_POINTER], previous_pc as u16);
-//             assert_eq!(STACK_POINTER - 1, previous_sp);
-//         }
-//     }
-// }
